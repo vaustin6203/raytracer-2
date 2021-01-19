@@ -1,0 +1,287 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<style>
+    body {
+        padding: 100px;
+        width: 1000px;
+        margin: auto;
+        text-align: left;
+        font-weight: 300;
+        font-family: 'Open Sans', sans-serif;
+        color: #341c13;
+        background-color: #e8daab;
+    }
+    h1, h2 {
+        font-family: 'Source Sans Pro', sans-serif;
+        color: #616317;
+        text-align: center;
+    }
+    h3, h4 {
+        font-family: 'Source Sans Pro', sans-serif;
+        color: #c2600a;
+        text-align: center;
+    }
+    table {
+        table-layout: auto;
+        width: 100%;
+    }
+
+    thead th:nth-child(1) {
+        width: 30%;
+    }
+
+    thead th:nth-child(2) {
+        width: 20%;
+    }
+
+    thead th:nth-child(3) {
+        width: 15%;
+    }
+
+    thead th:nth-child(4) {
+        width: 35%;
+    }
+
+    th, td {
+        padding: 20px;
+    }
+    img {
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+        border-radius: 8px;
+    }
+  </style> 
+<title>Victoria Austin  |  CS 184</title>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" type="text/css" href="style.css" media="screen" />
+</head>
+<body>
+<br />
+<h1 align="middle">Assignment 3-2: PathTracer</h1>
+    <h2 align="middle">Victoria Austin</h2>
+    <img src="images/cover1.png" align="center" width="650px"/>
+    <h2 align="middle">Overview</h2>
+    <div class="padded">
+        <p>For this project I expanded on my PathTracer by implementing the ability to render new materials including mirrors, glass, and microfacet conductors. This was done by exploring new BRDFs for reflection, refraction, and microfacet modeling. I also enabled a new importance sampling method optimized for rendering microfacet materials. Throughout this project I compare how manipulating different parameters that characterize different materials and using different sampling techniques for rendering effect the overall outcome of the image.</p>
+
+    <h2 align="middle">Part 1: Mirror and Glass Materials</h2>
+            <img src="images/mirror_glass.png" align="center" width="500px"/>
+            <h3 align="middle">Reflection</h3>
+            <p>Given the wo direction in the object coordinate space, we want to update the wi direction to simulate reflection. Since we are in the object coordinate space, the origin is the point of intersection and the z-axis lies along the normal vector. This makes updating the wi direction as trivial as negating wo's x and y coordinates and using its same z coordinate.</p>
+            <h3 align="middle">Mirror Material</h3>
+            <p>To sample sample the spectrum of light that reflects from a mirror, we need to update the wi direction in the manner described above and set the pdf to one since this is a special case in the PathTracer's light estimation. Since mirrors only change the ray direction and don't cause Lambertian falloff, we want to cancel out the cosine from the at_least_one_bounce_radiance function. Therefore, the spectrum returned is the reflectance of the object divided by the absolute value of the cosine of wi. </p>
+            <h3 align="middle">Refraction</h3>
+            <img src="images/refraction.png" align="center" width="400px"/>
+            <p>Refraction is the change in direction of a light ray when it passes from one medium to another. In this case we are concerned with computing the entering or exiting direction of a light ray from air to glass or visa versa. Since we are in object space coordinates, we can use Snell's law to determine that our wo vector begins as:</p>
+            <p align="middle"><pre align="middle">wo.x = sin(theta)cos(phi), wo.y = sin(theta)sin(phi), wo.z = +/- cos(theta)</pre></p>
+            <p>The surface normal always points out into the air, so if wo is initially in the air entering the glass, then wo.z will be positive and if wo is initially inside the glass and exiting, wo.z will be negative. Eta is defined as the ratio of the old index of refraction to new index of refraction. Air has a index of refraction of 1, and each material has its own index of refraction, ior. Therefore, eta is either 1 / ior if wo is entering the glass and ior / 1 if wo is exiting the glass.
+            Snell's law states that sin(theta') = eta * sin(theta) and cos(theta') = (1 - eta^2(1 - cos^2(theta)))^0.5. However, if 1 - eta^2(1 - cos^2(theta)) < 0, there is total internal reflection and we do not need to update wi and return false, since there is no refraction. If this isn't the case, I update wi to be:</p>
+            <p align="middle"><pre align="middle">wi.x = -eta * wo.x, wi.y = -eta * wo.y, wi.z = +/- (1 - eta^2(1 - cos^2(theta)))^0.5,</pre></p>
+            <p>such that wi.z has the opposite sign of wo.z and return true.</p>
+            <h3 align="middle">Glass Material</h3>
+            <p>To sample the light being refracted from a glass object, we first need to check that there is not total internal reflection as stated prior. If there is no valid refraction, I update the reflection of wo to wi, set the pdf to 1, and return the reflectance / |cos(wi)|. If there is a valid refraction, we need to compute the reflection and refraction at this point of intersection. I compute the ratio of the reflection energy to the refraction energy using Schlick's reflection coefficient: </p>
+            <p align="middle"><pre align="middle">R(theta) = R_0 + ( 1 - R_0)(1 - |cos(theta)|)^5, where R_0 = ((1 - ior) / (1 + ior))^2.</pre></p>
+            <p>I flip a coin with probability R to determine if this sampled direction will reflect or refract. If the coin flip returns true, I assign the reflection of wo to wi, set the pdf to R, and return R * reflectance / |cos(wi)|. Otherwise, I assign the refraction of wo to wi, set the pdf to 1 - R and return (1 - R) * transmittance / |cos(wi)| * eta^2.</p>
+            <h3 align="middle">Comparison of Maximum Ray Depths</h3>
+            <p>The images below were rendered with 256 samples/pixel, 4 samples/light, and a max ray depth of 0, 1, 2, 3, 4, 5, and 100. With a max ray depth of 0, no light bounces off any objects so we can only see the light source. </p><p>With a max ray depth of 1, we can se the first bounce of light on the objects. The left sphere is a mirror and the right sphere is made of glass. We can see that the first bounce of light is more diffuse in the glass material than the mirror material.</p>
+            <p>In the image with a  max ray depth = 2, we can see the light bounce off the spheres and then bounce off each other and around the room. We can see the mirror sphere reflect the room, but the room is still very dark since there hasn't been enough bounces to illuminate the whole room. We can see some transparency in the glass sphere, but it is still very dark because not enough light has bounced from it yet. We can also start to see a subtle reflection of the room in the glass sphere. The shadow being casted
+                from the spheres is getting lighter, with the mirror having a more solid shadow and the glass having a more diffuse shadow with a decent amount of light shining through due to its transparency.</p><p> The image with a max ray depth of 3 has a brighter more illuminated room as our third bounce accumulates light from the first and second bounce. This is clearly seen in both materials, as the reflectance of the mirror sphere shows the ceiling being illuminated and the glass sphere is truly transparent with a clear reflection coming from the blue wall. The shadow casted by the glass sphere has a
+                stronger spotlight now since more light is shining through the glass.</p><p> The difference between the 3rd bounce and fourth bounce image is less obvious, but the room as been further brightened along with the glass sphere. As more and more light bounces off the glass sphere, it loses its milky appearance and becomes almost completely clear and it's shadow is even lighter. </p><p>The image with max ray depth of 5 is subtly lighter than the previous image, which you can see from the walls and ceiling of the room. The spheres have little difference at this point due to their high reflectance and transparency, they can
+                only absorb so much light within, and instead continue to reflect and refract more and more light around the room.</p><p> The final image with max ray depth of 100, is clearly brighter than all the other images and this is seen in the brightness of the walls and in their reflection from the mirrored sphere. The glass sphere is a clear glass with crisp reflections of the room as more and more light accumulates and the objects' estimated pixel spectrums of light converge.</p>
+            <div align="middle">
+                <table style="width=100%">
+                    <tr>
+                        <td>
+                            <img src="images/CBspheres_part1_m0.png" align="middle" width="480px"/>
+                            <figcaption align="middle">max ray depth = 0</figcaption>
+                        </td>
+                        <td>
+                            <img src="images/CBspheres_part1_m1.png" align="middle" width="480px"/>
+                            <figcaption align="middle">max ray depth = 1</figcaption>
+                        </td>
+                    </tr>
+                    <br>
+                    <tr>
+                        <td>
+                            <img src="images/CBspheres_part1_m2.png" align="middle" width="480px"/>
+                            <figcaption align="middle">max ray depth = 2</figcaption>
+                        </td>
+                        <td>
+                            <img src="images/CBspheres_part1_m3.png" align="middle" width="480px"/>
+                            <figcaption align="middle">max ray depth = 3</figcaption>
+                        </td>
+                    </tr>
+                    <br>
+                    <tr>
+                        <td>
+                            <img src="images/CBspheres_part1_m4.png" align="middle" width="480px"/>
+                            <figcaption align="middle">max ray depth = 4</figcaption>
+                        </td>
+                        <td>
+                            <img src="images/CBspheres_part1_m5.png" align="middle" width="480px"/>
+                            <figcaption align="middle">max ray depth = 5</figcaption>
+                        </td>
+                    </tr>
+                    <br>
+                    <tr>
+                        <td>
+                            <img src="images/CBspheres_part1_m100.png" align="middle" width="480px"/>
+                            <figcaption align="middle">max ray depth = 100</figcaption>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <h2 align="middle">Part 2: Microfacet Material</h2>
+            <img src="images/metals.png" align="center" width="400px"/>
+            <h3 align="middle">Microfacet BRDF</h3>
+            <div align="middle">
+                <table style="width=100%">
+                    <tr>
+                        <td>
+                            <img src="images/microfacetf.png" align="middle" width="350px"/>
+                        </td>
+                        <td>
+                            <img src="images/h.png" align="middle" width="350px"/>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <p>The microfacet model was used to implement the rendering of rough isotropic conductors, or metals with varying degrees of roughness. The BRDF for microfacet material is depicted above with F(wi) being the Fresnel function, G(wo, wi) being the shadowing-masking function, and D(h) being the normal distribution function (NDF). These functions and their implementation will be described in greater detail in later parts.
+            For the equation above, n is the macro surface normal (0, 0, 1) in object coordinates and h is the half vector described in the right image above. The idea behind microfacet BRDF models is to statistically model the scattering of light from a large collection of microfacets, or ridges on the surface of the material. The aggregated illumination from these microfacets is what determines how the light will scatter from the surface.</p>
+            <h3 align="middle">Normal Distribution Function (NDF)</h3>
+            <img src="images/microfacetd.png" align="center" width="250px"/>
+            <p>The NDF describes how the microfacets' normals are distributed given the light incident and outgoing directions wi and wo. Since we assume the microfacets are a perfect mirror, the normals of the microfacets that are exactly along the half vector h are able to reflect wi to w0. My implementation of the NDF uses the Beckmann distribution and is given above. The Beckmann distribution is similar to a Gaussian distribution with alpha being used to describe the roughness of the macro surface, and theta being the angle between h and the macro surface normal n.
+            Alpha is usually between the range 0.005 to 0.5 with smaller alphas creating smoother macro surfaces. This causes the materials scattering of light to be more diffuse with large values of alpha and glossy with small values of alpha.</p>
+            <h3 align="middle">Fresnel Term</h3>
+            <img src="images/microfacet_fresnel.png" align="center" width="400px"/>
+            <p>The Fresnel term describes the reflection and transmission of light when incident between two different optical material surfaces. For microfacet material, we need to use the air-conductor Fresnel term which defines the reflection and transmission of light between air and a conductor. The air-conductor Fresnel term is wavelength dependent, so to be theoretically accurate, we need to calculate the Fresnel term for every possible wavelength and convert
+            the sampled spectrum to an RGB color. However, this would be excessively complex so instead, I only calculated the Fresnel terms for the R, G, B channels, assuming each channel has a fixed wavelength. These approximations are shown above, where n and k collectively represent the indices of refraction for conductors. These scalars characterize how different kinds of metals refract light. I used this website: <a href="https://refractiveindex.info/">https://refractiveindex.info/</a> to determine the different n and k values for different conductors at wavelengths 614 nm (red), 549 nm (green), and 466 nm (blue).</p>
+            <h3 align="middle">Importance Sampling</h3>
+            <div align="middle">
+            <table style="width=100%">
+                <tr>
+                    <td>
+                        <img src="images/theta_phi_pdfs.png" align="middle" width="300px"/>
+                    </td>
+                    <td>
+                        <img src="images/theta_phi.png" align="middle" width="300px"/>
+                    </td>
+                </tr>
+            </table>
+            </div>
+            <p>To sample from a Beckmann distribution, I implemented importance sampling according to the shape of the NDF. It is best to use importance sampling for sampling microfacet material rather than cosine hemisphere sampling since this method will take longer to converge to a noise-free image since we are not focusing our samples on regions that will have the most influence in the overall lighting effect. I first sample theta and phi according to the pdfs shown at the top left. In order to get theta and phi, I used the inversion method by integrating and inversing these pdfs to get the equations on the top right, where r1 and r2 are random numbers uniformly distributed within [0, 1).
+            I then combine theta and phi to get the sampled microfacet normal h, which uses the circular coordinates:</p>
+            <p align="middle"><pre align="middle">h.x = sin(theta) * cos(phi), h.y = sin(theta) * sin(phi), h.z = cos(theta).</pre></p>
+            <p>Reflecting wo according to h, I obtained the reflection vector wi as:</p>
+            <img src="images/wi_part2.png" align="center" width="260px"/>
+            <p>If the z-coordinate of the sampled wi is less than or equal to zero, then the direction is invalid and we should return a zero BRDF. To obtain the pdf of sampling wi, I first had to calculate the pdf of sampling h, which is the formula at the bottom left. Then the pdf of sampling wi becomes the formula at the bottom right.</p>
+            <div align="middle">
+                <table style="width=100%">
+                    <tr>
+                        <td>
+                            <img src="images/pdf_h.png" align="middle" width="250px"/>
+                        </td>
+                        <td>
+                            <img src="images/pdf_wi.png" align="middle" width="250px"/>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <p>I then return the result of the microfacet BRDF with wo and the updated wi.</p>
+            <h3 align="middle">Comparison of Different Values of Alpha</h3>
+            <p>The images below are of a dragon made of gold and where rendered with 256 samples/pixel, 4 samples/light, and a max ray depth of 7 will different values of alpha. The first image has the lowest alpha of 0.005. This image's dragon is the most glossy or mirror like. This image also has the most noise, seen as little white dots. Objects with lower alpha values have more noise because they reflect more light in particular directions rather than rougher objects, which scatter light in more evenly distributed directions. This causes images with lower alpha values to require more samples to converge, which is why it is paramount to use importance sampling over cosine hemisphere sampling. The second image has an alpha of 0.05 and is slightly less glossy, with noticeably less noise. The third image has an alpha of 0.25 and is more diffuse, giving it a slightly more matte appearance. If we look at the walls of the third
+            image compared to the second, we can also clearly see there is less noise. The final image was rendered with an alpha of 0.5 and is the most matte looking. This more diffuse appearance is due to light being scattered in more varied directions due to light hitting more ridges on the surface of the material. The difference in noise compared to the third image is more apparent in the dragons, where the final dragon clearly has less white dots. I believe the difference is clearer in the dragons than the walls because the walls absorb more light then they reflect and therefore, take less time to converge than the glossier gold of the third dragon.</p>
+            <div align="middle">
+                <table style="width=100%">
+                    <tr>
+                        <td>
+                            <img src="images/CBdragon_p2_a005.png" align="middle" width="480px"/>
+                            <figcaption align="middle">alpha = 0.005</figcaption>
+                        </td>
+                        <td>
+                            <img src="images/CBdragon_p2_a05.png" align="middle" width="480px"/>
+                            <figcaption align="middle">alpha = 0.05</figcaption>
+                        </td>
+                    </tr>
+                    <br>
+                    <tr>
+                        <td>
+                            <img src="images/CBdragon_p2_a25.png" align="middle" width="480px"/>
+                            <figcaption align="middle">alpha = 0.25</figcaption>
+                        </td>
+                        <td>
+                            <img src="images/CBdragon_p2_a5.png" align="middle" width="480px"/>
+                            <figcaption align="middle">alpha = 0.5</figcaption>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <h3 align="middle">Cosine Hemisphere vs. Importance Sampling</h3>
+            <p>The bunnies below are made of copper and were rendered with 64 samples/pixel, 1 sample/light, and a max ray depth of 5. The image to the left used cosine hemisphere sampling, while the right image used my implementation of importance sampling. The cosine hemisphere sampling image has far more noise and the bunny also has lots of black dots, whereas the importance sampling bunny has no black dots and the copper color is much more true. Not to mention importance sampling took a fraction of the time it took to render using cosine hemisphere sampling.
+            The reason for all these discrepancies boils down to importance sampling taking great care to sample directions with a probability consistent with the particular way light would scatter according to particular properties of the material. This allows us to focus our sampling in regions with the most optical complexity and causes our rendering processing to converge much faster than cosine hemisphere sampling.</p>
+            <div align="middle">
+                <table style="width=100%">
+                    <tr>
+                        <td>
+                            <img src="images/CBbunny_p2_H.png" align="middle" width="480px"/>
+                            <figcaption align="middle">Cosine Hemisphere Sampling</figcaption>
+                        </td>
+                        <td>
+                            <img src="images/CBbunny_p2.png" align="middle" width="480px"/>
+                            <figcaption align="middle">Importance Sampling</figcaption>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <h3 align="middle">Exploring Various Conductor Materials</h3>
+            <p>As explained while implementing the Fresnel term, we can change the conductive material of an object by changing its n and k values. For each wavelength 614 nm (red), 549 nm (green), and 466 nm (blue), I used <a href="https://refractiveindex.info/">https://refractiveindex.info/</a> to look up the corresponding n and k values of a particular element along with the graphs below. One thing I found interesting while exploring the n and k values of different elements was that each element has a particular range of wavelengths that can be used to find its n and k values. For example, I was interested in modeling osmium since it has a unique silvery blue color however, its range of valid wavelengths were lower than the fixed wavelengths of our RGB channels. After a little research, I discovered that different materials have different regions of the spectrum where they do not absorb light, and this could be the reason I was unable to find n and k values for our particular wavelengths. The left graph below shows osmium's transmittance as a function of wavelength, and it decays exponentially as wavelength increases.
+            In contrast, the right graph below is of silver, which has a higher range of wavelengths where its transmittance peaks and generally, seems to be much more effective at transmitting radiant energy.</p>
+            <div align="middle">
+                <table style="width=100%">
+                    <tr>
+                        <td>
+                            <img src="images/osmium.png" align="middle" width="400px"/>
+                            <figcaption align="middle">Osmium: Transmittance vs. Wavelength</figcaption>
+                        </td>
+                        <td>
+                            <img src="images/silver.png" align="middle" width="400px"/>
+                            <figcaption align="middle">Silver: Transmittance vs. Wavelength</figcaption>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <p>For the first image below, the left sphere is made of aluminum with alpha = 0.025 and the right sphere has an alpha of 0.25 and is made of silver. The second image uses the same alpha values, but the left sphere is make of beryllium and the right sphere is made of calcium. Comparing the two images, the aluminum and silver appear to be much lighter in color to the beryllium and calcium. The bunnies both have an alpha of 0.05, with the left made of bismuth and the right made of caesium. Both materials appear to be equally reflective, with bismuth taking a dark gray color and caesium having a silvery gold color.</p>
+            <div align="middle">
+                <table style="width=100%">
+                    <tr>
+                        <td>
+                            <img src="images/CBspheres_p2_as.png" align="middle" width="480px"/>
+                            <figcaption align="middle">materials: aluminum, silver</figcaption>
+                        </td>
+                        <td>
+                            <img src="images/CBspheres_p2_bc.png" align="middle" width="480px"/>
+                            <figcaption align="middle">materials: beryllium, calcium</figcaption>
+                        </td>
+                    </tr>
+                    <br>
+                    <tr>
+                        <td>
+                            <img src="images/CBbunny_p2_bismuth.png" align="middle" width="480px"/>
+                            <figcaption align="middle">material: bismuth</figcaption>
+                        </td>
+                        <td>
+                            <img src="images/CBbunny_p2_caesium.png" align="middle" width="480px"/>
+                            <figcaption align="middle">material: caesium</figcaption>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+</div>
+</body>
+</html>
+
+
+
+
